@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goffy Gober Shell Eater - Goose Mod
 // @namespace    https://github.com/override909/goffy-gober-shell-eater-mod
-// @version      0.5.1
+// @version      0.6.0
 // @description  Cosmetic only: eggs wearing the turkey face become an Untitled-Goose-Game-style goose (in game and in the menu preview), turkey gun skins become goose guns, grenades become Fall Guys ducks with a vine-boom explosion. Toggle in the Goose Mod settings (Alt+G).
 // @match        *://shellshock.io/*
 // @match        *://*.shellshock.io/*
@@ -31,7 +31,7 @@
     gunWords: /(gun|weapon|eggk|scrambler|ranger|rpegg|whipper|crackshot|trihard|cluck|pistol|smg|shotgun|sniper|rocket)/i,
     // Untitled Goose Game palette (body, feet, beak, eyes)
     gooseColors: { body: '#f4f2ec', feet: '#f0912f', beak: '#f0912f', eyes: '#1b1b1b' },
-    gooseScale: 1.0,
+    gooseScale: 1.0,             // extra size multiplier on top of the panel's "Goose size"
     gooseOffset: { x: 0, y: 0, z: 0 },
     gooseRotationY: Math.PI,     // radians; set to 0 if the goose faces backwards
     gunScale: 1.0,
@@ -42,6 +42,7 @@
     // sound files to replace with the vine boom (matched against the file URL)
     grenadeSoundPattern: /(grenade|explo|boom)[^/]*\.(mp3|ogg|wav|m4a|webm|aac)(\?|#|$)/i,
     maxPlayerMeshes: 40,         // safety: never hide a node tree bigger than this
+    maxEggSize: 5,               // when looking for the egg by position, ignore anything bigger (walls, floors)
     scanIntervalMs: 500,
   };
 
@@ -49,7 +50,7 @@
   // Settings (toggled in the in-game panel, saved in this browser only)
   // ---------------------------------------------------------------------------------
   const SETTINGS_KEY = 'goffyGooseMod.settings';
-  const DEFAULTS = { enabled: true, gooseSkin: true, gooseGuns: true, duckGrenades: true, grenadeSound: true, model: 'detailed', debug: false };
+  const DEFAULTS = { enabled: true, gooseSkin: true, gooseGuns: true, duckGrenades: true, grenadeSound: true, model: 'detailed', gooseSize: 1, duckSize: 1, gooseFlip: false, debug: false };
   const settings = Object.assign({}, DEFAULTS, load());
   function load() { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; } }
   function save() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* private mode etc. */ } }
@@ -369,26 +370,88 @@
     return false;
   }
 
+  const GOOSE_MODEL_HEIGHT = 1.35; // height of the goose models at scale 1
+
+  // The egg a face belongs to: the biggest egg-sized mesh around the face's position.
+  // Looks in the face's own node tree first, then (if the game keeps hats/faces in a
+  // separate tree) anywhere in the scene.
+  function findEgg(trigger, root, sc) {
+    trigger.computeWorldMatrix(true);
+    const tp = trigger.getAbsolutePosition();
+    const pick = (list, limit) => {
+      let best = null, bestVol = 0;
+      for (const m of list) {
+        if (m === trigger || !drawable(m) || partOfGun(m, null) || !m.isEnabled()) continue;
+        m.computeWorldMatrix(true);
+        const bb = m.getBoundingInfo().boundingBox, lo = bb.minimumWorld, hi = bb.maximumWorld;
+        const size = [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z], big = Math.max(...size);
+        if (!(big > 0) || big > limit || Math.min(...size) < big * 0.3) continue; // skip walls and flat decals
+        const pad = big * 0.15;
+        if (tp.x < lo.x - pad || tp.x > hi.x + pad || tp.y < lo.y - pad || tp.y > hi.y + pad || tp.z < lo.z - pad || tp.z > hi.z + pad) continue;
+        const vol = size[0] * size[1] * size[2];
+        if (vol > bestVol) { best = m; bestVol = vol; }
+      }
+      return best;
+    };
+    const own = root.getChildMeshes ? root.getChildMeshes(false).concat(drawable(root) ? [root] : []) : [];
+    return pick(own, Infinity) || pick(sc.meshes, CONFIG.maxEggSize);
+  }
+
+  function treeMeshes(node) {
+    const list = node.getChildMeshes ? node.getChildMeshes(false) : [];
+    if (node.getTotalVertices) list.push(node);
+    return list;
+  }
+
   function dressPlayer(trigger, sc) {
     const root = rootOf(trigger);
     if (players.has(root)) return;
-    const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
-    if (root.getTotalVertices) meshes.push(root);
-    if (meshes.length > CONFIG.maxPlayerMeshes) { log('skipped: node tree too big to be one player', root.name, meshes.length); return; }
+    const egg = findEgg(trigger, root, sc);
+    const host = egg ? rootOf(egg) : root; // the goose rides on whatever moves the egg
+    if (players.has(host)) return;
+    // hide the face's tree and the egg's tree (body, face, hats), never guns/grenades
+    let meshes = treeMeshes(root);
+    if (host !== root) meshes = meshes.concat(treeMeshes(host));
+    if (meshes.length > CONFIG.maxPlayerMeshes) {
+      if (!egg) { log('skipped: node tree too big to be one player', root.name, meshes.length); return; }
+      meshes = [trigger].concat(treeMeshes(egg)); // big shared tree: only hide the egg itself
+    }
     const tpl = template(sc, 'goose');
     if (!tpl) return;
-    // hide the egg body/face/hats, but never the player's gun (or anything attached to it)
-    const hidden = meshes.filter((m) => !isOurs(m) && !partOfGun(m, root));
+    const hidden = [...new Set(meshes)].filter((m) => !isOurs(m) && !partOfGun(m, null));
     hide(hidden);
     const inst = tpl.clone('gooseMod_goose');
     inst.setEnabled(true);
-    inst.parent = root;
-    inst.scaling.setAll(CONFIG.gooseScale);
-    inst.position.set(CONFIG.gooseOffset.x, CONFIG.gooseOffset.y, CONFIG.gooseOffset.z);
-    inst.rotation.y = CONFIG.gooseRotationY;
-    copyLook(hidden.find((m) => m.getTotalVertices && m.getTotalVertices() > 0), inst);
-    players.set(root, { trigger, inst, hidden });
-    log('goose applied to', root.name);
+    inst.parent = host;
+    copyLook(egg || hidden.find(drawable), inst);
+    const e = { trigger, inst, hidden, egg };
+    players.set(host, e);
+    placeGoose(e);
+    log('goose applied to', host.name, egg ? '(egg: ' + egg.name + ')' : '(no egg found)');
+  }
+
+  // Stand the goose where the egg stands, as tall as the egg x "Goose size".
+  function placeGoose(e) {
+    const o = CONFIG.gooseOffset, size = settings.gooseSize * CONFIG.gooseScale;
+    e.inst.rotation.y = CONFIG.gooseRotationY + (settings.gooseFlip ? Math.PI : 0);
+    if (e.egg && !e.egg.isDisposed()) {
+      try {
+        const b = localBounds(e.inst.parent, [e.egg]);
+        e.inst.scaling.setAll((b.size[1] / GOOSE_MODEL_HEIGHT) * size);
+        e.inst.position.set(b.center.x + o.x, b.center.y - b.size[1] / 2 + o.y, b.center.z + o.z);
+        return;
+      } catch (err) { log('could not measure egg', err); }
+    }
+    e.inst.scaling.setAll(size);
+    e.inst.position.set(o.x, o.y, o.z);
+  }
+
+  // The game may switch the egg back on (respawn, menu, every frame...). Re-hide our
+  // swapped meshes right before each camera draws, which is after the game's updates.
+  function enforceHidden() {
+    for (const map of [players, guns, grenades]) for (const e of map.values()) {
+      for (const m of e.hidden) if (m.isVisible) m.isVisible = false;
+    }
   }
 
   // Copy how the game draws an item onto our replacement. Your own gun is often drawn
@@ -434,8 +497,9 @@
     inst.setEnabled(true);
     inst.parent = item;
     copyLook(parts[0], inst);
-    try { place(inst, localBounds(item, parts)); } catch (e) { log('could not measure', item.name, e); }
-    map.set(item, { inst, hidden: parts });
+    let bounds = null;
+    try { bounds = localBounds(item, parts); place(inst, bounds); } catch (e) { log('could not measure', item.name, e); }
+    map.set(item, { inst, hidden: parts, bounds, place });
     log(kind, 'swapped:', item.name);
   }
   const placeGun = (inst, b) => {
@@ -449,7 +513,7 @@
   const placeGrenade = (inst, b) => {
     const size = Math.max(...b.size) || 0.25;
     inst.position.set(b.center.x, b.center.y - size / 2, b.center.z);
-    inst.scaling.setAll(size * 1.4 * CONFIG.grenadeScale);
+    inst.scaling.setAll(size * 1.4 * CONFIG.grenadeScale * settings.duckSize);
     inst.rotation.y = CONFIG.grenadeRotationY;
   };
 
@@ -459,6 +523,12 @@
     let top = n;
     for (let p = n.parent; p; p = p.parent) if (!isOurs(p) && pred(labelOf(p))) top = p;
     return top;
+  }
+
+  // Re-apply sizes/facing (used by the panel sliders, so changes show up live).
+  function applySizes() {
+    for (const e of players.values()) placeGoose(e);
+    for (const e of grenades.values()) if (e.bounds) e.place(e.inst, e.bounds);
   }
 
   function undress(map, key) {
@@ -497,8 +567,8 @@
 
     // drop swaps whose item is gone or whose toggle got switched off
     for (const [root, e] of players) {
-      if (!skinOn || e.trigger.isDisposed() || root.isDisposed() || !e.trigger.isEnabled()) undress(players, root);
-      else hide(e.hidden); // the game may re-show meshes on respawn / in the menu
+      if (!skinOn || e.trigger.isDisposed() || root.isDisposed() || !e.trigger.isEnabled() || (e.egg && e.egg.isDisposed())) undress(players, root);
+      else { hide(e.hidden); placeGoose(e); } // the game may re-show meshes on respawn / in the menu
     }
     for (const [gun, e] of guns) { if (!gunsOn || gun.isDisposed()) undress(guns, gun); else hide(e.hidden); }
     for (const [g, e] of grenades) { if (!ducksOn || g.isDisposed()) undress(grenades, g); else hide(e.hidden); }
@@ -508,6 +578,7 @@
       if (!watched.has(sc) && sc.onNewMeshAddedObservable) {
         watched.add(sc);
         sc.onNewMeshAddedObservable.add((m) => setTimeout(() => check(m, sc), 0));
+        if (sc.onBeforeCameraRenderObservable) sc.onBeforeCameraRenderObservable.add(enforceHidden);
       }
       if (skinOn || gunsOn || ducksOn) for (const n of sc.meshes.concat(sc.transformNodes || [])) check(n, sc);
     }
@@ -515,6 +586,19 @@
   }
 
   // Debug helper: lists the mesh/material names the game is using right now.
+  // Debug helper: shows how each turkey-face egg was found (paste this to the mod author).
+  window.gooseModInspect = () => {
+    const lines = [];
+    for (const sc of liveScenes()) for (const n of sc.meshes.concat(sc.transformNodes || [])) {
+      if (isOurs(n) || !isFace(labelOf(n))) continue;
+      const chain = []; for (let p = n; p; p = p.parent) chain.push(p.name);
+      const root = rootOf(n), egg = findEgg(n, root, sc);
+      lines.push(`face "${labelOf(n)}"\n  parents: ${chain.join(' <- ')}\n  tree: ${treeMeshes(root).map((m) => m.name).join(', ')}\n  egg found: ${egg ? egg.name + ' (tree ' + rootOf(egg).name + ')' : 'none'}`);
+    }
+    console.log('[GooseMod]\n' + (lines.join('\n') || 'no turkey face found right now'));
+    return lines.length + ' turkey face(s)';
+  };
+
   window.gooseModNames = () => {
     const names = new Set();
     for (const sc of liveScenes()) for (const n of sc.meshes.concat(sc.transformNodes || [])) if (!isOurs(n)) names.add(labelOf(n));
@@ -547,6 +631,8 @@
       #gooseModPanel h3{margin:0 0 8px;font-size:14px}
       #gooseModPanel label{display:flex;gap:8px;align-items:center;margin:6px 0;cursor:pointer}
       #gooseModPanel select{margin-left:auto}
+      #gooseModPanel input[type=range]{margin-left:auto;width:96px}
+      #gooseModPanel output{width:34px;text-align:right;font-variant-numeric:tabular-nums}
       #gooseModPanel small{display:block;margin-top:8px;color:#666}
       #gooseModStatus{margin:0 0 8px;padding:6px 8px;border-radius:8px;background:#fff;font-size:12px;color:#333}`;
     const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
@@ -561,6 +647,9 @@
       <label><input type="checkbox" data-k="gooseGuns"> Goose guns on turkey gun skins</label>
       <label><input type="checkbox" data-k="duckGrenades"> Duck grenades (all grenades)</label>
       <label><input type="checkbox" data-k="grenadeSound"> Vine boom grenade sound*</label>
+      <label>Goose size <input type="range" data-k="gooseSize" min="0.4" max="1.6" step="0.05"><output data-for="gooseSize"></output></label>
+      <label><input type="checkbox" data-k="gooseFlip"> Turn goose around</label>
+      <label>Duck grenade size <input type="range" data-k="duckSize" min="0.3" max="1.6" step="0.05"><output data-for="duckSize"></output></label>
       <label>Goose model
         <select data-k="model"><option value="detailed">Detailed</option><option value="simple">Simple (fastest)</option></select></label>
       <label><input type="checkbox" data-k="debug"> Debug log (console)</label>
@@ -570,14 +659,24 @@
 
     panel.querySelectorAll('[data-k]').forEach((el) => {
       const k = el.dataset.k;
+      const out = panel.querySelector(`output[data-for="${k}"]`);
+      const showValue = () => { if (out) out.textContent = Math.round(settings[k] * 100) + '%'; };
       if (el.type === 'checkbox') el.checked = !!settings[k]; else el.value = settings[k];
+      showValue();
+      el.addEventListener('keydown', (e) => e.stopPropagation()); // don't move/shoot while using the panel
+      if (el.type === 'range') {
+        // sliders and "turn around" update live, without rebuilding anything
+        el.addEventListener('input', () => { settings[k] = parseFloat(el.value); showValue(); applySizes(); });
+        el.addEventListener('change', save);
+        return;
+      }
       el.addEventListener('change', () => {
         settings[k] = el.type === 'checkbox' ? el.checked : el.value;
         save();
+        if (k === 'gooseFlip') { applySizes(); return; }
         resetAll(k === 'model');
         scan();
       });
-      el.addEventListener('keydown', (e) => e.stopPropagation());
     });
     const toggle = () => { panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
     btn.addEventListener('click', toggle);
