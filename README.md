@@ -3,8 +3,9 @@
 A cosmetic Shell Shockers mod. **Only eggs wearing the turkey face look different**:
 instead of the egg body + face, they show a 3D turkey model. Everything else is untouched.
 
-> Status: **placeholder (v0.1.0), untested in a live game.** It uses a simple built-in
-> turkey and a best-effort name match to find the turkey face. See "Tweaking" below.
+> Status: **v0.2.0, untested in a live game.** The turkey is a built-in low-poly model
+> (no download, ~2,000 triangles, one mesh, so it won't lag the browser). Finding the turkey
+> face uses a best-effort name match. See "Tweaking" below.
 
 ## Install
 
@@ -22,7 +23,8 @@ instead of the egg body + face, they show a 3D turkey model. Everything else is 
 | Option | What it does |
 | --- | --- |
 | `turkeyMeshPattern` | Regex matching the turkey-face mesh name. If nothing happens, set `debug: true`, look at mesh names in the console, and adjust this. |
-| `modelUrl` | URL of your own `.glb` turkey. Empty = built-in placeholder. See `models/README.md`. |
+| `style` | `'normal'` (live turkey) or `'roasted'` (golden roast on a tray). |
+| `modelUrl` | URL of your own `.glb` turkey. Empty = built-in low-poly turkey. See `models/README.md`. |
 | `scale`, `offset` | Resize / nudge the turkey so it sits right. |
 | `debug` | Logs what the mod is doing to the browser console. |
 

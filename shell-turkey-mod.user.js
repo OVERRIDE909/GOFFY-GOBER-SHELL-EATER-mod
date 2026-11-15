@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goffy Gober Shell Eater - Turkey Egg Mod
 // @namespace    https://github.com/override909/goffy-gober-shell-eater-mod
-// @version      0.1.0-placeholder
+// @version      0.2.0
 // @description  Cosmetic only: eggs wearing the turkey face get a full turkey 3D model instead of the egg body + face.
 // @match        *://shellshock.io/*
 // @match        *://*.shellshock.io/*
@@ -27,7 +27,9 @@
     // Optional: URL of your own turkey model (.glb / .babylon). Leave '' to use the
     // built-in placeholder turkey made from simple shapes.
     modelUrl: '',
-    // Size/offset tweaks applied to the turkey (placeholder or custom model).
+    // Built-in turkey style: 'normal' (live turkey) or 'roasted' (golden roast on a tray).
+    style: 'normal',
+    // Size/offset tweaks applied to the turkey (built-in or custom model).
     scale: 1.0,
     offset: { x: 0, y: 0, z: 0 },
     // How often (ms) to scan the scene for newly-spawned turkey eggs.
@@ -37,52 +39,80 @@
 
   const log = (...a) => CONFIG.debug && console.log('[TurkeyMod]', ...a);
 
-  // ---- Build the placeholder turkey out of basic Babylon shapes ----------------
-  function buildPlaceholderTurkey(B, scene) {
-    const root = new B.TransformNode('turkeyMod_root', scene);
-    const mat = (name, hex) => {
-      const m = new B.StandardMaterial('turkeyMod_' + name, scene);
+  // ---- Build the built-in low-poly turkey --------------------------------------
+  // Low segment counts + merged into ONE mesh (a few draw calls, a few hundred
+  // triangles) so it will not lag the browser even with a full lobby of turkeys.
+  let template = null;
+
+  function buildTemplate(B, scene) {
+    const roasted = CONFIG.style === 'roasted';
+    const col = (hex) => {
+      const m = new B.StandardMaterial('turkeyMod_mat_' + hex, scene);
       m.diffuseColor = B.Color3.FromHexString(hex);
       m.specularColor = new B.Color3(0.05, 0.05, 0.05);
+      m.freeze();
       return m;
     };
-    const brown = mat('brown', '#7b4a21');
-    const tan = mat('tan', '#c9985a');
-    const red = mat('red', '#c0281e');
-    const yellow = mat('yellow', '#f2b705');
-    const black = mat('black', '#111111');
+    const skin = roasted ? col('#a85a1c') : col('#7b4a21');   // body
+    const wing = roasted ? col('#8a4414') : col('#5a3416');
+    const feather = roasted ? col('#c9772b') : col('#c9985a'); // tail / drumsticks
+    const head = roasted ? col('#a85a1c') : col('#d9a58a');
+    const red = col('#c0281e');
+    const yellow = col('#f2b705');
+    const black = col('#111111');
+    const bone = col('#f3ead6');
 
-    const add = (mesh, material, x, y, z) => {
-      mesh.material = material;
-      mesh.parent = root;
+    const parts = [];
+    const add = (mesh, mat, x, y, z, rx, ry, rz, sx, sy, sz) => {
+      mesh.material = mat;
       mesh.position.set(x, y, z);
-      mesh.isPickable = false;
+      mesh.rotation.set(rx || 0, ry || 0, rz || 0);
+      mesh.scaling.set(sx || 1, sy || 1, sz || 1);
+      parts.push(mesh);
       return mesh;
     };
+    const sph = (d, seg) => B.MeshBuilder.CreateSphere('tm_s', { diameter: d, segments: seg || 6 }, scene);
+    const cyl = (h, d, dt) => B.MeshBuilder.CreateCylinder('tm_c', { height: h, diameterBottom: d, diameterTop: dt === undefined ? d : dt, tessellation: 7 }, scene);
 
-    // body
-    const body = add(B.MeshBuilder.CreateSphere('tm_body', { diameter: 0.9 }, scene), brown, 0, 0.45, 0);
-    body.scaling.set(1, 0.95, 1.2);
-    // head + neck
-    add(B.MeshBuilder.CreateSphere('tm_head', { diameter: 0.34 }, scene), tan, 0, 1.0, 0.42);
-    add(B.MeshBuilder.CreateCylinder('tm_neck', { height: 0.4, diameter: 0.18 }, scene), tan, 0, 0.8, 0.38);
-    // beak, wattle, eyes
-    const beak = add(B.MeshBuilder.CreateCylinder('tm_beak', { height: 0.2, diameterTop: 0, diameterBottom: 0.12 }, scene), yellow, 0, 1.0, 0.64);
-    beak.rotation.x = Math.PI / 2;
-    add(B.MeshBuilder.CreateSphere('tm_wattle', { diameter: 0.12 }, scene), red, 0, 0.88, 0.58).scaling.y = 1.6;
-    add(B.MeshBuilder.CreateSphere('tm_eyeL', { diameter: 0.06 }, scene), black, -0.1, 1.06, 0.55);
-    add(B.MeshBuilder.CreateSphere('tm_eyeR', { diameter: 0.06 }, scene), black, 0.1, 1.06, 0.55);
-    // tail fan (5 feathers)
-    for (let i = -2; i <= 2; i++) {
-      const f = add(B.MeshBuilder.CreateBox('tm_feather' + i, { width: 0.16, height: 0.7, depth: 0.04 }, scene),
-        i % 2 ? tan : brown, i * 0.22, 0.75, -0.5);
-      f.rotation.z = -i * 0.28;
-      f.rotation.x = -0.25;
+    // body (a plump oval; the main "roast" shape)
+    add(sph(0.95, 8), skin, 0, 0.5, 0, 0, 0, 0, 1, 0.9, 1.25);
+    // wings
+    add(sph(0.5, 5), wing, -0.5, 0.55, 0.0, 0, 0, 0.3, 0.45, 0.9, 1.4);
+    add(sph(0.5, 5), wing, 0.5, 0.55, 0.0, 0, 0, -0.3, 0.45, 0.9, 1.4);
+    // drumsticks
+    add(sph(0.38, 5), feather, -0.32, 0.18, 0.28, 0, 0, 0, 1, 1.15, 1);
+    add(sph(0.38, 5), feather, 0.32, 0.18, 0.28, 0, 0, 0, 1, 1.15, 1);
+    add(cyl(0.22, 0.07), bone, -0.32, 0.02, 0.5, Math.PI / 2.4, 0, 0);
+    add(cyl(0.22, 0.07), bone, 0.32, 0.02, 0.5, Math.PI / 2.4, 0, 0);
+
+    if (roasted) {
+      // roasted turkey: little head is tucked/omitted, add a tray rim instead
+      add(B.MeshBuilder.CreateCylinder('tm_tray', { height: 0.06, diameter: 1.6, tessellation: 14 }, scene), bone, 0, -0.05, 0.05);
+    } else {
+      // neck + head + beak + wattle + eyes
+      add(cyl(0.45, 0.2, 0.15), head, 0, 0.95, 0.5, 0.35, 0, 0);
+      add(sph(0.34, 6), head, 0, 1.2, 0.62);
+      add(cyl(0.2, 0.12, 0), yellow, 0, 1.18, 0.82, Math.PI / 2);
+      add(sph(0.13, 4), red, 0, 1.03, 0.76, 0, 0, 0, 1, 1.7, 1);
+      add(sph(0.07, 4), black, -0.11, 1.26, 0.76);
+      add(sph(0.07, 4), black, 0.11, 1.26, 0.76);
+      // tail fan (5 feathers)
+      for (let i = -2; i <= 2; i++) {
+        add(B.MeshBuilder.CreateBox('tm_f', { width: 0.18, height: 0.8, depth: 0.04 }, scene),
+          i % 2 ? feather : wing, i * 0.24, 0.95, -0.62, -0.3, 0, -i * 0.3);
+      }
+      // feet
+      add(cyl(0.3, 0.1), yellow, -0.22, -0.02, 0.25);
+      add(cyl(0.3, 0.1), yellow, 0.22, -0.02, 0.25);
     }
-    // feet
-    add(B.MeshBuilder.CreateBox('tm_footL', { width: 0.14, height: 0.3, depth: 0.14 }, scene), yellow, -0.2, 0.0, 0.1);
-    add(B.MeshBuilder.CreateBox('tm_footR', { width: 0.14, height: 0.3, depth: 0.14 }, scene), yellow, 0.2, 0.0, 0.1);
-    return root;
+
+    // bake every part's transform and merge into a single multi-material mesh
+    const merged = B.Mesh.MergeMeshes(parts, true, true, undefined, false, true);
+    merged.name = 'turkeyMod_template';
+    merged.isPickable = false;
+    merged.setEnabled(false);
+    log('turkey template built, triangles:', merged.getTotalIndices() / 3);
+    return merged;
   }
 
   async function makeTurkey(B, scene) {
@@ -93,10 +123,13 @@
         res.meshes.forEach((m) => { if (!m.parent) m.parent = root; m.isPickable = false; });
         return root;
       } catch (e) {
-        console.warn('[TurkeyMod] custom model failed, using placeholder', e);
+        console.warn('[TurkeyMod] custom model failed, using built-in turkey', e);
       }
     }
-    return buildPlaceholderTurkey(B, scene);
+    if (!template) template = buildTemplate(B, scene);
+    const inst = template.clone('turkeyMod_inst'); // shares geometry + materials
+    inst.setEnabled(true);
+    return inst;
   }
 
   // ---- Find the "player" a turkey-face mesh belongs to -------------------------
