@@ -1,0 +1,14 @@
+{
+  "name": "goffy-mod-tools",
+  "private": true,
+  "type": "module",
+  "description": "Builds the low-poly goose model data that gets embedded in shell-goose-mod.user.js",
+  "scripts": {
+    "build-model": "node build-model.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.1.0",
+    "@gltf-transform/functions": "^4.1.0",
+    "meshoptimizer": "^0.22.0"
+  }
+}
