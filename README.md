@@ -2,7 +2,7 @@
 
 A cosmetic Shell Shockers userscript:
 
-- **Goose skin:** eggs wearing the **turkey face** become an Untitled-Goose-Game-style goose (white, orange beak and feet, black eyes).
+- **Goose skin:** eggs wearing the **turkey face** become an Untitled-Goose-Game-style goose (white, orange beak and feet, black eyes), in matches **and in the menu/shop egg preview**.
 - **Goose guns:** guns with a **turkey skin** become a goose blaster.
 - **Duck grenades:** **every** grenade (whatever skin you have) becomes a Fall Guys duck, in your hand and in flight.
 - **Vine boom:** the grenade explosion sound is replaced with the vine boom.
@@ -12,14 +12,14 @@ Purely visual/audio, and only on your screen: nobody else sees or hears the chan
 
 ![Goose Mod preview](docs/preview.png)
 
-> Status: **v0.4.0.** Tested in a mock Babylon.js scene in a real browser, **not yet in a live Shell Shockers match.**
+> Status: **v0.5.0.** Tested in a real browser against mock scenes that hide Babylon.js the way Shell Shockers does (Babylon 4.2 and 9.x), **not yet confirmed in a live Shell Shockers match.**
 > Finding the turkey face, turkey gun skins, grenades and the explosion sound is a best-effort name match (see *Tweaking*).
 
 ## Install
 
 1. Install a userscript manager such as [Tampermonkey](https://www.tampermonkey.net/).
 2. Open `shell-goose-mod.user.js` in this repo and click **Raw**. Tampermonkey offers to install it. (Or make a new script and paste the file in.)
-3. Go to [shellshock.io](https://shellshock.io) and join a game.
+3. Go to [shellshock.io](https://shellshock.io). Open the settings (**Alt+G**) and check the status line at the top.
 
 ## Settings
 
@@ -37,6 +37,17 @@ Press **Alt+G**, or click the small **Goose Mod** button in the bottom-left corn
 
 Settings are saved in your browser only.
 
+### Status line
+
+The top of the panel says what the mod is doing:
+
+| Status | Meaning |
+| --- | --- |
+| *Active in N scene(s): …* | Working. The counts show how many eggs, guns and grenades are swapped right now. |
+| *Waiting for the game's 3D scene…* | The mod can't find the game's 3D scene. If it stays like this in a match, the game probably updated; report it. |
+| *Found N 3D scene(s), getting ready…* | The scene was found but the mod hasn't been able to set up its materials yet. If it stays like this, report it. |
+| No **Goose Mod** button at all | The script isn't running on this site. Check Tampermonkey is enabled for it, and that the site address matches the `@match` lines at the top of the script. |
+
 ## Tweaking (`CONFIG` at the top of the script)
 
 | Option | What it does |
@@ -50,7 +61,7 @@ Settings are saved in your browser only.
 | `gunScale`, `gunRotation` | Size and direction of the goose gun. |
 | `grenadeScale` | Size of the duck grenade. |
 
-If something isn't swapped in game: turn on **Debug log**, look at the mesh names and sound URLs in the console, and adjust the patterns.
+If the status says *Active* but something isn't swapped: open the browser console (F12) and type `gooseModNames()`. It lists every mesh/material name the game is using right now, so you can see what the turkey face, gun skins and grenades are really called and adjust the patterns. Turning on **Debug log** also prints each swap and swapped sound URL.
 
 ## Using different models or sounds
 
