@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goffy Gober Shell Eater - Goose Mod
 // @namespace    https://github.com/override909/goffy-gober-shell-eater-mod
-// @version      0.5.0
+// @version      0.5.1
 // @description  Cosmetic only: eggs wearing the turkey face become an Untitled-Goose-Game-style goose (in game and in the menu preview), turkey gun skins become goose guns, grenades become Fall Guys ducks with a vine-boom explosion. Toggle in the Goose Mod settings (Alt+G).
 // @match        *://shellshock.io/*
 // @match        *://*.shellshock.io/*
@@ -33,11 +33,12 @@
     gooseColors: { body: '#f4f2ec', feet: '#f0912f', beak: '#f0912f', eyes: '#1b1b1b' },
     gooseScale: 1.0,
     gooseOffset: { x: 0, y: 0, z: 0 },
-    gooseRotationY: 0,           // radians; use Math.PI if the goose faces backwards
+    gooseRotationY: Math.PI,     // radians; set to 0 if the goose faces backwards
     gunScale: 1.0,
     gunRotation: { x: 0, y: 0, z: 0 },
     grenadePattern: /grenade/i,  // any grenade (independent of skins)
     grenadeScale: 1.0,           // 1 = duck as tall as ~1.4x the grenade
+    grenadeRotationY: 0,         // radians; Math.PI turns the duck around
     // sound files to replace with the vine boom (matched against the file URL)
     grenadeSoundPattern: /(grenade|explo|boom)[^/]*\.(mp3|ogg|wav|m4a|webm|aac)(\?|#|$)/i,
     maxPlayerMeshes: 40,         // safety: never hide a node tree bigger than this
@@ -273,16 +274,22 @@
     return makeMesh(K, sc, 'gooseMod_template', g.positions, g.indices, g.colors);
   }
 
-  // "Goose gun": a goose-themed blaster laid along +Z, 1 unit long.
+  // "Goose gun": a goose-themed blaster laid along +Z (barrel = big orange beak),
+  // about 1 unit long, with a little goose head as the sight.
   function buildGooseGun(K, sc) {
-    const C = CONFIG.gooseColors;
+    const C = CONFIG.gooseColors, wing = '#dcd8cf';
     const g = shapes([
-      { shape: 'box', size: [0.16, 0.18, 0.6], at: [0, 0, 0], color: C.body },
-      { shape: 'cyl', top: 0.3, size: [0.13, 0.3, 0.13], at: [0, 0.01, 0.44], rx: Math.PI / 2, color: C.beak },
-      { shape: 'sphere', seg: 4, size: [0.04, 0.04, 0.04], at: [-0.08, 0.06, 0.24], color: C.eyes },
-      { shape: 'sphere', seg: 4, size: [0.04, 0.04, 0.04], at: [0.08, 0.06, 0.24], color: C.eyes },
-      { shape: 'box', size: [0.1, 0.22, 0.1], at: [0, -0.17, -0.15], rx: -0.3, color: C.feet },
-      { shape: 'box', size: [0.06, 0.06, 0.26], at: [0, 0.12, -0.05], color: C.body },
+      { shape: 'sphere', seg: 8, size: [0.2, 0.22, 0.56], at: [0, 0, -0.06], color: C.body },               // body
+      { shape: 'sphere', seg: 6, size: [0.04, 0.15, 0.34], at: [-0.1, 0.01, -0.09], color: wing },        // wings
+      { shape: 'sphere', seg: 6, size: [0.04, 0.15, 0.34], at: [0.1, 0.01, -0.09], color: wing },
+      { shape: 'cyl', top: 0.3, size: [0.13, 0.42, 0.13], at: [0, 0.0, 0.4], rx: Math.PI / 2, color: C.beak }, // beak barrel
+      { shape: 'cyl', size: [0.07, 0.2, 0.07], at: [0, 0.16, -0.19], rx: -0.35, color: C.body },           // neck
+      { shape: 'sphere', seg: 6, size: [0.12, 0.11, 0.15], at: [0, 0.27, -0.14], color: C.body },          // head (sight)
+      { shape: 'cyl', top: 0, tess: 6, size: [0.05, 0.08, 0.05], at: [0, 0.26, -0.04], rx: Math.PI / 2, color: C.beak },
+      { shape: 'sphere', seg: 4, size: [0.025, 0.025, 0.025], at: [-0.058, 0.29, -0.12], color: C.eyes },
+      { shape: 'sphere', seg: 4, size: [0.025, 0.025, 0.025], at: [0.058, 0.29, -0.12], color: C.eyes },
+      { shape: 'box', size: [0.08, 0.2, 0.1], at: [0, -0.17, -0.13], rx: -0.3, color: C.feet },           // grip (leg)
+      { shape: 'box', size: [0.17, 0.03, 0.19], at: [0, -0.27, -0.1], color: C.feet },                    // webbed foot
     ]);
     return makeMesh(K, sc, 'gooseMod_gunTemplate', g.positions, g.indices, g.colors);
   }
@@ -379,40 +386,80 @@
     inst.scaling.setAll(CONFIG.gooseScale);
     inst.position.set(CONFIG.gooseOffset.x, CONFIG.gooseOffset.y, CONFIG.gooseOffset.z);
     inst.rotation.y = CONFIG.gooseRotationY;
+    copyLook(hidden.find((m) => m.getTotalVertices && m.getTotalVertices() > 0), inst);
     players.set(root, { trigger, inst, hidden });
     log('goose applied to', root.name);
+  }
+
+  // Copy how the game draws an item onto our replacement. Your own gun is often drawn
+  // in its own layer / on top of the world (so it doesn't poke into walls); a model
+  // without the same settings ends up invisible in your hand.
+  function copyLook(from, to) {
+    if (!from) return;
+    to.renderingGroupId = from.renderingGroupId;
+    to.layerMask = from.layerMask;
+    if (from.alwaysSelectAsActiveMesh) to.alwaysSelectAsActiveMesh = true;
+  }
+  const drawable = (m) => m.getTotalVertices && m.getTotalVertices() > 0 && !isOurs(m);
+  const partsOf = (item) => (drawable(item) ? [item] : []).concat(item.getChildMeshes ? item.getChildMeshes(false).filter(drawable) : []);
+
+  // Bounds of an item and everything attached to it, in the item's own local space.
+  function localBounds(item, parts) {
+    item.computeWorldMatrix(true);
+    const inv = item.getWorldMatrix().clone().invert();
+    const V = item.position.constructor;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const m of parts) {
+      m.computeWorldMatrix(true);
+      if (m.refreshBoundingInfo) m.refreshBoundingInfo();
+      for (const c of m.getBoundingInfo().boundingBox.vectorsWorld) {
+        const q = V.TransformCoordinates(c, inv);
+        [q.x, q.y, q.z].forEach((v, k) => { lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); });
+      }
+    }
+    return { center: new V((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2), size: [0, 1, 2].map((k) => hi[k] - lo[k]) };
   }
 
   // Shared by guns and grenades: hide the item and parent our model to it, so it follows
   // the item's own movement (aiming, recoil, flying, bouncing).
   function dressItem(item, sc, map, kind, place) {
     if (map.has(item)) return;
+    const parts = partsOf(item);
+    if (!parts.length) return;
     const tpl = template(sc, kind);
     if (!tpl) return;
     cleanClone(item);
-    const hidden = [item].concat(item.getChildMeshes ? item.getChildMeshes(false).filter((m) => !isOurs(m)) : []);
-    hide(hidden);
+    hide(parts);
     const inst = tpl.clone(kind === 'gun' ? 'gooseMod_gun' : 'gooseMod_grenade');
     inst.setEnabled(true);
     inst.parent = item;
-    try {
-      item.refreshBoundingInfo && item.refreshBoundingInfo();
-      place(inst, item.getBoundingInfo().boundingBox);
-    } catch (e) { /* no bounds: keep defaults */ }
-    map.set(item, { inst, hidden });
+    copyLook(parts[0], inst);
+    try { place(inst, localBounds(item, parts)); } catch (e) { log('could not measure', item.name, e); }
+    map.set(item, { inst, hidden: parts });
     log(kind, 'swapped:', item.name);
   }
-  const placeGun = (inst, bb) => {
-    const len = 2 * Math.max(bb.extendSize.x, bb.extendSize.y, bb.extendSize.z) || 1;
-    inst.position.copyFrom(bb.center);
+  const placeGun = (inst, b) => {
+    const [sx, sy, sz] = b.size, len = Math.max(sx, sy, sz) || 1;
+    inst.position.copyFrom(b.center);
     inst.scaling.setAll(len * CONFIG.gunScale);
-    inst.rotation.set(CONFIG.gunRotation.x, CONFIG.gunRotation.y, CONFIG.gunRotation.z);
+    // our gun lies along Z; if the game's gun is longest along X, turn ours to match
+    const r = CONFIG.gunRotation;
+    inst.rotation.set(r.x, r.y + (sx === len && sx > sz ? Math.PI / 2 : 0), r.z);
   };
-  const placeGrenade = (inst, bb) => {
-    const size = 2 * Math.max(bb.extendSize.x, bb.extendSize.y, bb.extendSize.z) || 0.25;
-    inst.position.set(bb.center.x, bb.center.y - size / 2, bb.center.z);
+  const placeGrenade = (inst, b) => {
+    const size = Math.max(...b.size) || 0.25;
+    inst.position.set(b.center.x, b.center.y - size / 2, b.center.z);
     inst.scaling.setAll(size * 1.4 * CONFIG.grenadeScale);
+    inst.rotation.y = CONFIG.grenadeRotationY;
   };
+
+  // The highest node in this branch that still matches (a gun skin may be a group of
+  // meshes; swap the whole group once, not every piece).
+  function topMatch(n, pred) {
+    let top = n;
+    for (let p = n.parent; p; p = p.parent) if (!isOurs(p) && pred(labelOf(p))) top = p;
+    return top;
+  }
 
   function undress(map, key) {
     const e = map.get(key);
@@ -436,9 +483,9 @@
     if (!settings.enabled || isOurs(n) || !n.isEnabled()) return;
     const label = labelOf(n);
     try {
-      if (isGrenade(label)) { if (settings.duckGrenades && n.getTotalVertices) dressItem(n, sc, grenades, 'grenade', placeGrenade); return; }
+      if (isGrenade(label)) { if (settings.duckGrenades) dressItem(topMatch(n, isGrenade), sc, grenades, 'grenade', placeGrenade); return; }
       if (!CONFIG.facePattern.test(label)) return;
-      if (settings.gooseGuns && isGun(label) && n.getTotalVertices) dressItem(n, sc, guns, 'gun', placeGun);
+      if (settings.gooseGuns && isGun(label)) dressItem(topMatch(n, isGun), sc, guns, 'gun', placeGun);
       else if (settings.gooseSkin && isFace(label)) dressPlayer(n, sc);
     } catch (err) { console.warn('[GooseMod]', err); }
   }

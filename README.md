@@ -12,7 +12,7 @@ Purely visual/audio, and only on your screen: nobody else sees or hears the chan
 
 ![Goose Mod preview](docs/preview.png)
 
-> Status: **v0.5.0.** Tested in a real browser against mock scenes that hide Babylon.js the way Shell Shockers does (Babylon 4.2 and 9.x), **not yet confirmed in a live Shell Shockers match.**
+> Status: **v0.5.1.** Tested in a real browser against mock scenes that hide Babylon.js the way Shell Shockers does (Babylon 4.2 and 9.x), **not yet confirmed in a live Shell Shockers match.**
 > Finding the turkey face, turkey gun skins, grenades and the explosion sound is a best-effort name match (see *Tweaking*).
 
 ## Install
@@ -57,9 +57,9 @@ The top of the panel says what the mod is doing:
 | `grenadePattern` | Regex matching grenade meshes. |
 | `grenadeSoundPattern` | Regex matching the explosion sound file's URL. |
 | `gooseColors` | Body / feet / beak / eyes colours. |
-| `gooseScale`, `gooseOffset`, `gooseRotationY` | Size, position and facing of the goose. |
-| `gunScale`, `gunRotation` | Size and direction of the goose gun. |
-| `grenadeScale` | Size of the duck grenade. |
+| `gooseScale`, `gooseOffset`, `gooseRotationY` | Size, position and facing of the goose (`gooseRotationY: 0` turns it around). |
+| `gunScale`, `gunRotation` | Size and direction of the goose gun (it sizes itself to the real gun automatically). |
+| `grenadeScale`, `grenadeRotationY` | Size and facing of the duck grenade. |
 
 If the status says *Active* but something isn't swapped: open the browser console (F12) and type `gooseModNames()`. It lists every mesh/material name the game is using right now, so you can see what the turkey face, gun skins and grenades are really called and adjust the patterns. Turning on **Debug log** also prints each swap and swapped sound URL.
 
