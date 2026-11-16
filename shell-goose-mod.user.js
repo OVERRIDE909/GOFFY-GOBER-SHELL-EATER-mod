@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goffy Gober Shell Eater - Goose Mod
 // @namespace    https://github.com/override909/goffy-gober-shell-eater-mod
-// @version      0.6.0
+// @version      0.6.1
 // @description  Cosmetic only: eggs wearing the turkey face become an Untitled-Goose-Game-style goose (in game and in the menu preview), turkey gun skins become goose guns, grenades become Fall Guys ducks with a vine-boom explosion. Toggle in the Goose Mod settings (Alt+G).
 // @match        *://shellshock.io/*
 // @match        *://*.shellshock.io/*
@@ -31,6 +31,7 @@
     gunWords: /(gun|weapon|eggk|scrambler|ranger|rpegg|whipper|crackshot|trihard|cluck|pistol|smg|shotgun|sniper|rocket)/i,
     // Untitled Goose Game palette (body, feet, beak, eyes)
     gooseColors: { body: '#f4f2ec', feet: '#f0912f', beak: '#f0912f', eyes: '#1b1b1b' },
+    gooseHeightVsEgg: 1.08,      // goose height vs. the egg it replaces: top of its head just above the egg
     gooseScale: 1.0,             // extra size multiplier on top of the panel's "Goose size"
     gooseOffset: { x: 0, y: 0, z: 0 },
     gooseRotationY: Math.PI,     // radians; set to 0 if the goose faces backwards
@@ -381,7 +382,7 @@
     const pick = (list, limit) => {
       let best = null, bestVol = 0;
       for (const m of list) {
-        if (m === trigger || !drawable(m) || partOfGun(m, null) || !m.isEnabled()) continue;
+        if (m === trigger || !drawable(m) || partOfGun(m, null) || !m.isEnabled() || !shownByGame(m) || m.visibility === 0) continue; // skip invisible hitboxes
         m.computeWorldMatrix(true);
         const bb = m.getBoundingInfo().boundingBox, lo = bb.minimumWorld, hi = bb.maximumWorld;
         const size = [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z], big = Math.max(...size);
@@ -397,6 +398,9 @@
     return pick(own, Infinity) || pick(sc.meshes, CONFIG.maxEggSize);
   }
 
+  // Visible as far as the game is concerned (ignores our own hiding).
+  const shownByGame = (m) => (origVisible.has(m) ? origVisible.get(m) : m.isVisible);
+
   function treeMeshes(node) {
     const list = node.getChildMeshes ? node.getChildMeshes(false) : [];
     if (node.getTotalVertices) list.push(node);
@@ -406,6 +410,7 @@
   function dressPlayer(trigger, sc) {
     const root = rootOf(trigger);
     if (players.has(root)) return;
+    for (const e of players.values()) if (e.trigger === trigger) return; // already done (face in a separate tree)
     const egg = findEgg(trigger, root, sc);
     const host = egg ? rootOf(egg) : root; // the goose rides on whatever moves the egg
     if (players.has(host)) return;
@@ -419,27 +424,34 @@
     const tpl = template(sc, 'goose');
     if (!tpl) return;
     const hidden = [...new Set(meshes)].filter((m) => !isOurs(m) && !partOfGun(m, null));
+    const wasVisible = new Set(hidden.filter(shownByGame));
     hide(hidden);
     const inst = tpl.clone('gooseMod_goose');
     inst.setEnabled(true);
     inst.parent = host;
     copyLook(egg || hidden.find(drawable), inst);
-    const e = { trigger, inst, hidden, egg };
+    // what to measure the goose against: the egg, or else the player's visible parts
+    const measure = egg ? [egg] : hidden.filter((m) => m !== trigger && wasVisible.has(m) && drawable(m) && m.visibility !== 0);
+    const e = { trigger, inst, hidden, egg, measure };
     players.set(host, e);
     placeGoose(e);
     log('goose applied to', host.name, egg ? '(egg: ' + egg.name + ')' : '(no egg found)');
   }
 
-  // Stand the goose where the egg stands, as tall as the egg x "Goose size".
+  // Stand the goose where the egg stands; top of its head just above the egg
+  // (CONFIG.gooseHeightVsEgg), times the panel's "Goose size".
   function placeGoose(e) {
     const o = CONFIG.gooseOffset, size = settings.gooseSize * CONFIG.gooseScale;
     e.inst.rotation.y = CONFIG.gooseRotationY + (settings.gooseFlip ? Math.PI : 0);
-    if (e.egg && !e.egg.isDisposed()) {
+    const parts = (e.measure || []).filter((m) => !m.isDisposed());
+    if (parts.length) {
       try {
-        const b = localBounds(e.inst.parent, [e.egg]);
-        e.inst.scaling.setAll((b.size[1] / GOOSE_MODEL_HEIGHT) * size);
-        e.inst.position.set(b.center.x + o.x, b.center.y - b.size[1] / 2 + o.y, b.center.z + o.z);
-        return;
+        const b = localBounds(e.inst.parent, parts);
+        if (b.size[1] > 0) {
+          e.inst.scaling.setAll((b.size[1] * CONFIG.gooseHeightVsEgg / GOOSE_MODEL_HEIGHT) * size);
+          e.inst.position.set(b.center.x + o.x, b.center.y - b.size[1] / 2 + o.y, b.center.z + o.z);
+          return;
+        }
       } catch (err) { log('could not measure egg', err); }
     }
     e.inst.scaling.setAll(size);
@@ -593,7 +605,12 @@
       if (isOurs(n) || !isFace(labelOf(n))) continue;
       const chain = []; for (let p = n; p; p = p.parent) chain.push(p.name);
       const root = rootOf(n), egg = findEgg(n, root, sc);
-      lines.push(`face "${labelOf(n)}"\n  parents: ${chain.join(' <- ')}\n  tree: ${treeMeshes(root).map((m) => m.name).join(', ')}\n  egg found: ${egg ? egg.name + ' (tree ' + rootOf(egg).name + ')' : 'none'}`);
+      let eggInfo = 'none';
+      if (egg) { const bb = egg.getBoundingInfo().boundingBox; eggInfo = `${egg.name} (tree ${rootOf(egg).name}), ${(bb.maximumWorld.y - bb.minimumWorld.y).toFixed(2)} tall`; }
+      const g = players.get(rootOf(egg || n));
+      let gooseInfo = 'not applied';
+      if (g) { g.inst.computeWorldMatrix(true); const gb = g.inst.getBoundingInfo().boundingBox; gooseInfo = `${(gb.maximumWorld.y - gb.minimumWorld.y).toFixed(2)} tall`; }
+      lines.push(`face "${labelOf(n)}"\n  parents: ${chain.join(' <- ')}\n  tree: ${treeMeshes(root).map((m) => m.name + (m.isVisible ? '' : ' (hidden)')).join(', ')}\n  egg found: ${eggInfo}\n  goose: ${gooseInfo}`);
     }
     console.log('[GooseMod]\n' + (lines.join('\n') || 'no turkey face found right now'));
     return lines.length + ' turkey face(s)';

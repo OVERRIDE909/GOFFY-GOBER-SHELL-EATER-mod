@@ -12,7 +12,7 @@ Purely visual/audio, and only on your screen: nobody else sees or hears the chan
 
 ![Goose Mod preview](docs/preview.png)
 
-> Status: **v0.6.0.** Tested in a real browser against mock scenes that hide Babylon.js the way Shell Shockers does (Babylon 4.2 and 9.x), **not yet confirmed in a live Shell Shockers match.**
+> Status: **v0.6.1.** Tested in a real browser against mock scenes that hide Babylon.js the way Shell Shockers does (Babylon 4.2 and 9.x), **not yet confirmed in a live Shell Shockers match.**
 > Finding the turkey face, turkey gun skins, grenades and the explosion sound is a best-effort name match (see *Tweaking*).
 
 ## Install
@@ -32,7 +32,7 @@ Press **Alt+G**, or click the small **Goose Mod** button in the bottom-left corn
 | Goose guns on turkey gun skins | Swap turkey-skinned guns for the goose blaster. |
 | Duck grenades (all grenades) | Swap every grenade for the Fall Guys duck. |
 | Vine boom grenade sound | Replace the explosion sound. **Reload the page** after changing this one. |
-| Goose size | How tall the goose is compared with the egg it replaces (100% = same height as the egg). Updates live. |
+| Goose size | How big the goose is. At 100% the top of its head is just above the egg it replaces. Updates live. |
 | Turn goose around | Flips the goose 180° if it faces the wrong way. |
 | Duck grenade size | How big the duck grenades are. Updates live. |
 | Goose model | **Detailed** (~4,000 triangles) or **Simple** (~1,000 triangles, for slow PCs/Chromebooks). |
@@ -61,13 +61,14 @@ The top of the panel says what the mod is doing:
 | `grenadeSoundPattern` | Regex matching the explosion sound file's URL. |
 | `gooseColors` | Body / feet / beak / eyes colours. |
 | `gooseScale`, `gooseOffset`, `gooseRotationY` | Extra size multiplier, position nudge and facing of the goose (the panel's size slider and turn-around switch are easier). |
+| `gooseHeightVsEgg` | Goose height compared with the egg at 100% size (default `1.08`: head just above the egg). |
 | `maxEggSize` | When the egg isn't attached to the face, the mod looks for it by position and ignores anything bigger than this. |
 | `gunScale`, `gunRotation` | Size and direction of the goose gun (it sizes itself to the real gun automatically). |
 | `grenadeScale`, `grenadeRotationY` | Size and facing of the duck grenade. |
 
 If the status says *Active* but something isn't swapped: open the browser console (F12) and type `gooseModNames()`. It lists every mesh/material name the game is using right now, so you can see what the turkey face, gun skins and grenades are really called and adjust the patterns. Turning on **Debug log** also prints each swap and swapped sound URL.
 
-If the egg still shows under the goose, type `gooseModInspect()` in the console: it shows, for each turkey face, which egg the mod matched it to. Paste that to the mod author.
+If the egg still shows under the goose, type `gooseModInspect()` in the console: it shows, for each turkey face, which egg the mod matched it to and how tall the egg and goose are. Paste that to the mod author.
 
 ## Using different models or sounds
 
